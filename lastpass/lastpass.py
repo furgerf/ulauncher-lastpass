@@ -10,57 +10,31 @@ logger = logging.getLogger(__name__)
 class Lastpass:
     """ Class that interacts with LastPass CLI """
     def get_passwords(self, query):
-        cmd = "lpass show -G %s --json" % query
+        # --basic-regexp: case insensitive search
+        # --expand-multi: always get back JSON
+        cmd = "lpass show --json --expand-multi --basic-regexp %s" % query
 
         result = self.lpass(cmd)
 
         if result.return_code != 0:
             return self.handle_errors(result.output)
 
-        return self.parse_list_results(result.output)
+        return self.parse_list_results(query, result.output)
 
-    def parse_list_results(self, output):
+    def parse_list_results(self, query, output):
         """ Parses the LastPass response """
 
-        # Check if we get a json response. If yes, it means the LastPass cli
-        # returned a single result and we have to treat it differently
-        try:
-            site_data = json.loads(output)
-            item = site_data[0]
-            return [{
-                'id': item["id"],
-                'name': item["name"],
-                'folder': item["group"]
-            }]
-        except ValueError:
-            pass
+        site_data = json.loads(output)
 
-        # Process multiple matches
-        items = []
-        for line in output.splitlines():
-            if "Multiple matches found" in line:
-                continue
-
-            # Split folder and site
-            parts = line.split("/")
-
-            folder = "/".join(parts[:len(parts) - 1])
-            site = parts[len(parts) - 1]
-
-            site_id_match = re.match(r".*\s\[id:\s(\d+)", site)
-
-            if not site_id_match:
-                logger.warn("Cannot parse site_id for string: %s", site)
-                continue
-
-            name_re = re.match(r"(.*)\[id:\s\d+]", site)
-            items.append({
-                'id': site_id_match.group(1),
-                'name': name_re.group(1),
-                'folder': folder,
-            })
-
-        return items
+        # lpass seems to return every entry where at least one of the parts of the query matches
+        # however, multiple query parts are used to _restrict_ the results, so only keep the entries
+        # that contain _all_ parts of the query
+        result = [{
+            'id': item["id"],
+            'name': item["name"],
+            'folder': item["group"]
+        } for item in site_data if all(q.lower() in item["name"].lower() for q in query.split(" "))]
+        return result
 
     def get_item(self, id):
         """ Returns a single item from LastPass vault with the specified id """
@@ -132,7 +106,9 @@ class Lastpass:
         stdout = stdout.decode('utf-8')
         stderr = stderr.decode('utf-8')
 
-        if stdout:
+        if stdout and stderr:
+            output = "%s / %s" % (stdout, stderr)
+        elif stdout:
             output = stdout
         else:
             output = stderr
