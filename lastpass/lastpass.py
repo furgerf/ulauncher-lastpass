@@ -31,7 +31,7 @@ class Lastpass:
         # that contain _all_ parts of the query
         result = [{
             'id': item["id"],
-            'name': item["name"],
+            'name': item["name"].replace("&", "&amp;"),
             'folder': item["group"]
         } for item in site_data if all(q.lower() in item["name"].lower() for q in query.split(" "))]
         return result
